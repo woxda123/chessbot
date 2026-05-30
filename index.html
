@@ -3,89 +3,138 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pro Chess Board</title>
+    <title>Pro Chess Online</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <style>
-        body { background: #121212; color: #ffffff; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        #board { width: 92vw; max-width: 380px; border-radius: 6px; overflow: hidden; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
-        .status-box { font-size: 16px; margin-bottom: 15px; background: #1e1e1e; padding: 10px 20px; border-radius: 20px; border: 1px solid #333; }
+        body { background: #121212; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; font-family: sans-serif; }
+        #board { width: 92vw; max-width: 380px; border-radius: 8px; overflow: hidden; box-shadow: 0 8px 24px rgba(0,0,0,0.6); }
+        .menu-box { display: flex; flex-direction: column; gap: 12px; width: 85%; max-width: 320px; text-align: center; }
+        h2 { margin-bottom: 20px; font-size: 24px; color: #f0d9b5; }
+        button { background: #308043; color: white; border: none; padding: 14px; border-radius: 8px; font-size: 18px; font-weight: bold; cursor: pointer; transition: background 0.2s; }
+        button:active { background: #246132; }
+        button.secondary { background: #262522; border: 1px solid #3d3b38; color: #bababa; font-size: 15px; }
+        button.secondary:active { background: #1f1e1c; }
+        .hidden { display: none !important; }
+        .status { margin-bottom: 15px; font-size: 15px; background: #1e1e1e; padding: 10px 20px; border-radius: 20px; border: 1px solid #2d2d2d; text-align: center; }
     </style>
 </head>
 <body>
 
-    <div class="status-box" id="status">Загрузка партии...</div>
-    <div id="board"></div>
+    <div id="menu" class="menu-box">
+        <h2>♟️ Шахматы Онлайн</h2>
+        <button id="startGameBtn">⚔️ Начать партию</button>
+        <button id="createInviteBtn" class="secondary">✉️ Вызвать друга на дуэль</button>
+    </div>
+
+    <div id="gameUi" class="hidden">
+        <div class="status" id="status">Подключение к серверу...</div>
+        <div id="board"></div>
+    </div>
 
     <script>
-        // Инициализируем Telegram Web App
         const tg = window.Telegram.WebApp;
-        tg.expand(); // Открываем приложение на весь экран телефона
+        tg.expand();
         tg.ready();
 
+        // --- ВСТАВЬ СЮДА СВОЮ ССЫЛКУ ИЗ LOCAL TUNNEL ---
+        const SERVER_URL = "https://shining-wolfs-cry.localtunnel.me"; 
+        
+        const socket = io(SERVER_URL);
         const game = new Chess();
         let board = null;
+        let myColor = null;
+        let currentRoom = null;
+        let myUsername = tg.initDataUnsafe?.user?.first_name || "Игрок";
+        let myUserId = tg.initDataUnsafe?.user?.id || Math.floor(Math.random() * 100000);
 
-        function onDragStart(source, piece, position, orientation) {
-            if (game.game_over()) return false;
-            // Игрок может ходить только за белых в этом тесте
-            if (piece.search(/^b/) !== -1) return false;
-        }
+        const startParam = tg.initDataUnsafe?.start_param || "";
 
-        function onDrop(source, target) {
-            let move = game.move({
-                from: source,
-                to: target,
-                promotion: 'q' // Авто-превращение в ферзя для простоты
-            });
+        socket.on('connect', () => {
+            // Если игрок зашел по ссылке-вызову (дуэль)
+            if (startParam.startsWith('challenge_')) {
+                document.getElementById('menu').classList.add('hidden');
+                document.getElementById('gameUi').classList.remove('hidden');
+                document.getElementById('status').innerText = "Вход в комнату дуэли...";
+                socket.emit('join_challenge', { room_id: startParam, username: myUsername });
+            }
+        });
 
-            if (move === null) return 'snapback'; // Если ход не по правилам — фигура летит назад
-            updateStatus();
+        // Кнопка: Начать партию (умный подбор)
+        document.getElementById('startGameBtn').onclick = () => {
+            document.getElementById('menu').classList.add('hidden');
+            document.getElementById('gameUi').classList.remove('hidden');
+            document.getElementById('status').innerText = "⏳ Поиск соперника...";
+            socket.emit('find_game', { username: myUsername });
+        };
+
+        // Кнопка: Создать вызов для друга
+        document.getElementById('createInviteBtn').onclick = () => {
+            const challengeRoomId = `challenge_${myUserId}_${Date.now()}`;
+            // Автоматически подставляем имя твоего бота из данных Telegram или заменяем вручную
+            const botUsername = tg.initDataUnsafe?.receiver?.username || "твой_про_шахматный_бот";
+            const inviteLink = `https://t.me/${botUsername}/game?startapp=${challengeRoomId}`;
             
-            // Ответ ИИ через 800 миллисекунд
-            window.setTimeout(makeBotMove, 800);
+            tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(inviteLink)}&text=${encodeURIComponent("⚔️ Давай сыграем в шахматы прямо в Telegram! Жми кнопку, чтобы зайти в партию:")}`);
+        };
+
+        socket.on('waiting', (data) => {
+            document.getElementById('status').innerText = data.message;
+        });
+
+        socket.on('game_start', (data) => {
+            currentRoom = data.room_id;
+            myColor = data.color; 
+            
+            let colorText = myColor === 'w' ? '⚪ Белыми' : '⚫ Черными';
+            document.getElementById('status').innerText = `Игра началась! Ты играешь ${colorText}. Противник: ${data.opponent}`;
+            
+            initChessboard();
+        });
+
+        function initChessboard() {
+            board = ChessBoard('board', {
+                draggable: true,
+                position: 'start',
+                orientation: myColor === 'w' ? 'white' : 'black',
+                onDragStart: (src, piece) => {
+                    if (game.game_over()) return false;
+                    if ((myColor === 'w' && piece.search(/^b/) !== -1) || (myColor === 'b' && piece.search(/^w/) !== -1)) return false;
+                    if ((game.turn() === 'w' && myColor !== 'w') || (game.turn() === 'b' && myColor !== 'b')) return false;
+                },
+                onDrop: (source, target) => {
+                    let move = game.move({ from: source, to: target, promotion: 'q' });
+                    if (move === null) return 'snapback';
+
+                    socket.emit('make_move', { room_id: currentRoom, move: { from: source, to: target } });
+                    updateStatus();
+                },
+                onSnapEnd: () => { board.position(game.fen()); },
+                pieceTheme: 'https://chessboard-js.com/img/chesspieces/wikipedia/{piece}.png'
+            });
         }
 
-        function makeBotMove() {
-            let possibleMoves = game.moves();
-            if (game.game_over()) return;
-
-            let randomIdx = Math.floor(Math.random() * possibleMoves.length);
-            game.move(possibleMoves[randomIdx]);
+        socket.on('opponent_move', (data) => {
+            game.move(data.move);
             board.position(game.fen());
             updateStatus();
-        }
+        });
 
-        function onSnapEnd() {
-            board.position(game.fen());
-        }
+        socket.on('opponent_left', () => {
+            document.getElementById('status').innerText = "🏳️ Соперник покинул игру или сдался.";
+        });
 
         function updateStatus() {
-            let statusText = '';
-            let moveColor = game.turn() === 'b' ? 'Черные' : 'Белые';
-
-            if (game.in_checkmate()) { statusText = `🏳️ Мат! Победили ${game.turn() === 'b' ? 'Белые' : 'Черные'}`; }
-            else if (game.in_draw()) { statusText = '🤝 Ничья!'; }
-            else {
-                statusText = `Ход: ${moveColor === 'Белые' ? '⚪ Твой ход' : '⚫ Думает бот...'}`;
-                if (game.in_check()) { statusText += ' ⚠️ ШАХ!'; }
-            }
-            document.getElementById('status').innerText = statusText;
+            let text = game.turn() === 'w' ? "Ход Белых" : "Ход Черных";
+            if (game.in_checkmate()) text = "🏳️ Мат! Игра окончена.";
+            else if (game.in_draw()) text = "🤝 Ничья!";
+            else if (game.in_check()) text += " (⚠️ ШАХ!)";
+            document.getElementById('status').innerText = text;
         }
-
-        const config = {
-            draggable: true,
-            position: 'start',
-            onDragStart: onDragStart,
-            onDrop: onDrop,
-            onSnapEnd: onSnapEnd,
-            pieceTheme: 'https://chessboard-js.com/img/chesspieces/wikipedia/{piece}.png'
-        };
-        board = ChessBoard('board', config);
-        updateStatus();
     </script>
 </body>
 </html>
