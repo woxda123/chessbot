@@ -42,7 +42,7 @@
         tg.ready();
 
         // --- ВСТАВЬ СЮДА СВОЮ ССЫЛКУ ИЗ LOCAL TUNNEL ---
-        const SERVER_URL = "https://shining-wolfs-cry.localtunnel.me"; 
+        const SERVER_URL =https://06da4ee8653abf45-213-230-93-38.serveousercontent.com "https://shining-wolfs-cry.localtunnel.me"; 
         
         const socket = io(SERVER_URL);
         const game = new Chess();
